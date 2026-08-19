@@ -70,8 +70,13 @@ Het oude endpoint kan daarna weg.
 
 ## Wat er in het image zit
 
-- **ReActor** (`comfy-node-install comfyui-reactor`) — `ReActorFaceSwap` doet
-  de swap én de CodeFormer-restauratie in één node.
+- **ReActor**, rechtstreeks van GitHub gekloond. Niet via
+  `comfy-node-install <naam>`: ReActor staat niet in het Comfy-register, dus
+  een naam zou daar niet oplossen. `ReActorFaceSwap` doet de swap én de
+  CodeFormer-restauratie in één node.
+- **Build-tools** (build-essential, cmake). insightface heeft geen kant-en-klaar
+  wheel voor deze combinatie en compileert vanaf broncode; zonder compiler
+  faalt de installatie met een onduidelijke foutmelding.
 - **De NSFW-filter uitgeschakeld.** De node bevat een nuditeitsclassifier die
   een zwart beeld teruggeeft bij wat hij afkeurt, en `nsfw_image()` geeft óók
   `True` terug als dat model niet laadt — één mislukte download zou dus alles
@@ -89,8 +94,21 @@ een andere checkpoint geen herbouw betekent:
 | `inswapper_128.onnx` | `models/insightface/` |
 | `codeformer-v0.1.0.pth` | `models/facerestore_models/` |
 
-Beide zet je erop met `scripts/setup-media.py` (of los met
-`scripts/volume-fetch.py inswapper`).
+**Beide staan er al.** inswapper is opgehaald (528 MB) en CodeFormer hoefde
+niet eens gedownload — die stond al in de oude A1111-map op het volume en is
+intern gekopieerd.
+
+## Daarna: video zonder framelimiet
+
+Nu geeft de worker een clip terug als losse PNG-frames, en RunPod begrenst hoe
+groot een antwoord mag zijn. Gemeten: 6 en 14 frames komen aan, 25 levert een
+job op die "geslaagd" meldt met helemaal geen output. Vandaar `VIDEO_FRAMES=14`.
+
+Een tweede build met VideoHelperSuite erbij laat de worker één kleine mp4
+teruggeven in plaats van een stapel frames, waarmee die limiet vervalt en de
+25 frames waar svd_xt voor getraind is wél kunnen. Dat is bewust een aparte
+stap: eerst face swap laten werken, dan pas iets toevoegen dat de build kan
+laten mislukken.
 
 ## Als het misgaat
 
