@@ -24,8 +24,14 @@ FROM runpod/worker-comfyui:5.8.6-base
 # combinatie) en heeft daarvoor een C++-toolchain plus cmake nodig. Ontbreken
 # die, dan faalt de pip-install met een weinig zeggende melding over een
 # missende compiler.
+#
+# curl staat er expliciet bij. Het basis-image heeft het NIET, wat pas bleek
+# toen de build afbrak met "curl: not found" op de eerste download - vier
+# stappen ver, na het compileren van insightface. ca-certificates hoort er
+# meteen bij, anders faalt elke https-download op een onbekende uitgever.
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends build-essential cmake git unzip && \
+    apt-get install -y --no-install-recommends \
+      build-essential cmake git unzip curl ca-certificates && \
     rm -rf /var/lib/apt/lists/*
 
 # Rechtstreeks van GitHub, niet via `comfy-node-install <naam>`: ReActor staat
@@ -95,14 +101,14 @@ RUN set -eu; \
         echo "proberen: $repo"; \
         if curl -fL --retry 3 --retry-delay 5 -o "$dest" \
              "https://huggingface.co/$repo/resolve/main/$file"; then \
-            got=$(stat -c %s "$dest"); \
+            got=$(wc -c < "$dest"); \
             if [ "$got" = "$expected" ]; then echo "gelukt via $repo ($got bytes)"; break; fi; \
             echo "verkeerde grootte van $repo: $got in plaats van $expected"; \
         fi; \
         rm -f "$dest"; \
     done; \
     test -s "$dest"; \
-    test "$(stat -c %s "$dest")" = "$expected"
+    test "$(wc -c < "$dest")" = "$expected"
 
 # Stable Video Diffusion, voor de videoknop.
 RUN comfy model download \
