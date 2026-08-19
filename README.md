@@ -68,6 +68,19 @@ ssh -t companion "sudo sed -i -e 's|^MEDIA_SERVERLESS_ENDPOINT_ID=.*|MEDIA_SERVE
 
 Het oude endpoint kan daarna weg.
 
+## Waarom hier een handler.py staat
+
+RunPods GitHub-build weigert een repo zonder handler: *"runpod.serverless.start()
+handler not found in your repo"*. Die controle gaat ervan uit dat je een worker
+vanaf nul schrijft. Wij bouwen juist voort op `runpod/worker-comfyui`, dat zijn
+eigen handler al meebrengt op `/handler.py` en start via `CMD ["/start.sh"]`.
+
+De Dockerfile kopieert `handler.py` niet naar het image, dus in de praktijk
+wordt hij nooit uitgevoerd — hij is er om de controle te passeren. Mocht RunPod
+hem ooit tóch als entrypoint gebruiken, dan draagt hij over aan `/start.sh`, wat
+ComfyUI opstart. Zonder die overdracht zou de worker wel antwoorden maar nooit
+iets kunnen renderen.
+
 ## Wat er in het image zit
 
 - **ReActor**, rechtstreeks van GitHub gekloond. Niet via
