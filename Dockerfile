@@ -65,3 +65,14 @@ RUN python -c "import os, sys; \
 hits = [r for r, _, _ in os.walk('/comfyui/custom_nodes') if 'eactor' in r.lower()]; \
 print('ReActor gevonden in:', hits[:1]); \
 sys.exit(0 if hits else 'ReActor is niet geinstalleerd')"
+
+# RunPods GitHub-build controleert of de Dockerfile een handler aanroept en
+# weigert de repo anders met "runpod.serverless.start() handler not found".
+# Het basis-image regelt dit zelf via CMD ["/start.sh"], maar dat is van
+# buitenaf niet zichtbaar. Vandaar dit expliciete startpunt.
+#
+# NIET naar /handler.py kopiëren: dat bestand bestaat al in het basis-image en
+# zou daarmee overschreven worden. rp_handler.py draagt direct over aan
+# /start.sh, zodat de container zich verder gedraagt als voorheen.
+COPY rp_handler.py /rp_handler.py
+CMD ["python3", "-u", "/rp_handler.py"]
