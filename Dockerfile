@@ -68,6 +68,15 @@ RUN set -eux; \
 # groot bestand telt zo niet op bij de rest; en bij een wijziging hoeft alleen
 # de betreffende laag opnieuw.
 
+# De checkpoint waar alle foto's op draaien. Origineel van Civitai, dat een
+# token eist; dit is een mirror die byte voor byte hetzelfde bestand levert
+# (6.938.041.176 bytes, gecontroleerd tegen het exemplaar dat op het volume
+# stond) en geen token nodig heeft.
+RUN comfy model download \
+      --url https://huggingface.co/useracctu/pornworks-real-porn-photo-realistic-nsfw-sdxl-and-pony-chekpoint/resolve/main/pornworksRealPornPhoto_ponyV04.safetensors \
+      --relative-path models/checkpoints \
+      --filename pornworksRealPornPhoto_ponyV04.safetensors
+
 # Stable Video Diffusion, voor de videoknop.
 RUN comfy model download \
       --url https://huggingface.co/stabilityai/stable-video-diffusion-img2vid-xt/resolve/main/svd_xt.safetensors \
@@ -92,7 +101,8 @@ RUN comfy model download \
 # Liever de build laten falen dan een generatie: een node of model dat er niet
 # is komt tijdens een request naar boven als een nietszeggende foutmelding.
 RUN python -c "import os, sys; \
-missing = [p for p in ['/comfyui/models/checkpoints/svd_xt.safetensors', \
+missing = [p for p in ['/comfyui/models/checkpoints/pornworksRealPornPhoto_ponyV04.safetensors', \
+                       '/comfyui/models/checkpoints/svd_xt.safetensors', \
                        '/comfyui/models/insightface/inswapper_128.onnx', \
                        '/comfyui/models/facerestore_models/codeformer-v0.1.0.pth'] \
            if not os.path.exists(p)]; \

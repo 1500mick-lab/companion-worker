@@ -99,17 +99,35 @@ iets kunnen renderen.
   een gezicht te vinden; hij komt als zip die in een specifieke maplayout
   uitgepakt moet worden, wat op een volume onhandig is.
 
-Modellen zitten bewust **niet** in het image — die blijven op het volume, zodat
-een andere checkpoint geen herbouw betekent:
+## Geen network volume meer
 
-| Bestand | Plek op het volume |
+De modellen zitten in het image. Dat was eerst andersom, maar een network
+volume bestaat in precies een datacenter (EU-RO-1), dus elke worker die het
+gebruikt moet daar draaien. Zat dat vol, dan namen de endpoints jobs aan en
+gebeurde er nooit iets — soms gemeld als `throttled`, soms als een worker die
+"klaar" heette en niets deed. Het chat-endpoint, dat geen volume gebruikt,
+heeft dat nooit gehad.
+
+| Bestand | In het image |
 | --- | --- |
-| `inswapper_128.onnx` | `models/insightface/` |
-| `codeformer-v0.1.0.pth` | `models/facerestore_models/` |
+| `pornworksRealPornPhoto_ponyV04.safetensors` | 6,9 GB, foto's |
+| `svd_xt.safetensors` | 8,9 GB, video |
+| `inswapper_128.onnx` | 529 MB, face swap |
+| `codeformer-v0.1.0.pth` | 359 MB, restauratie |
+| buffalo_l | detectie voor insightface |
 
-**Beide staan er al.** inswapper is opgehaald (528 MB) en CodeFormer hoefde
-niet eens gedownload — die stond al in de oude A1111-map op het volume en is
-intern gekopieerd.
+De Pony-checkpoint komt origineel van Civitai, dat een token eist. De mirror in
+de Dockerfile levert byte voor byte hetzelfde bestand — 6.938.041.176 bytes,
+gecontroleerd tegen het exemplaar dat op het volume stond — en heeft geen token
+nodig.
+
+**Koppel bij het aanmaken van het endpoint dus géén network volume meer.**
+Dat is nu juist wat je wilt vermijden: het zou de worker weer aan EU-RO-1
+vastpinnen zonder er iets voor terug te geven.
+
+Prijs van deze keuze: een image van tegen de 30 GB, en de allereerste start van
+een nieuwe worker duurt langer omdat dat image opgehaald moet worden. Daarna
+cachet RunPod het per machine.
 
 ## Daarna: video zonder framelimiet
 
