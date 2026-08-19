@@ -29,9 +29,15 @@ FROM runpod/worker-comfyui:5.8.6-base
 # toen de build afbrak met "curl: not found" op de eerste download - vier
 # stappen ver, na het compileren van insightface. ca-certificates hoort er
 # meteen bij, anders faalt elke https-download op een onbekende uitgever.
+#
+# libgl1 en libglib2.0-0 zijn er voor opencv-python. Dat pakket linkt tegen
+# libGL, dat in een kaal container-image ontbreekt; zonder deze twee faalt de
+# import van cv2 en daarmee de hele node - stil, want ComfyUI slaat een node
+# die niet importeert gewoon over.
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
-      build-essential cmake git unzip curl ca-certificates && \
+      build-essential cmake git unzip curl ca-certificates \
+      libgl1 libglib2.0-0 && \
     rm -rf /var/lib/apt/lists/*
 
 # Rechtstreeks van GitHub, niet via `comfy-node-install <naam>`: ReActor staat
@@ -40,6 +46,15 @@ RUN git clone --depth 1 https://github.com/Gourieff/ComfyUI-ReActor.git \
       /comfyui/custom_nodes/ComfyUI-ReActor && \
     python -m pip install --no-cache-dir \
       -r /comfyui/custom_nodes/ComfyUI-ReActor/requirements.txt
+
+# insightface en onnxruntime staan NIET in die requirements.txt - daar staan
+# alleen albumentations, onnx, opencv-python, numpy, segment_anything en
+# ultralytics in. De node importeert insightface wel bij het laden, dus zonder
+# deze regel registreert ReActorFaceSwap zich niet en meldt ComfyUI tijdens een
+# generatie alleen "Node 'ReActorFaceSwap' not found". Precies zo ging het de
+# eerste keer mis. Normaal regelt ComfyUI-Manager dit via de install.py van de
+# node; die draait hier niet.
+RUN python -m pip install --no-cache-dir insightface onnxruntime-gpu
 
 # De node bevat een nuditeitsclassifier - de README noemt het project
 # "SFW-Friendly" met "a nudity detector to avoid using this software with 18+
@@ -131,17 +146,13 @@ RUN comfy model download \
       --relative-path models/facerestore_models \
       --filename codeformer-v0.1.0.pth
 
-# Liever de build laten falen dan een generatie: een node of model dat er niet
-# is komt tijdens een request naar boven als een nietszeggende foutmelding.
-RUN python -c "import os, sys; \
-missing = [p for p in ['/comfyui/models/checkpoints/pornworksRealPornPhoto_ponyV04.safetensors', \
-                       '/comfyui/models/checkpoints/svd_xt.safetensors', \
-                       '/comfyui/models/insightface/inswapper_128.onnx', \
-                       '/comfyui/models/facerestore_models/codeformer-v0.1.0.pth'] \
-           if not os.path.exists(p)]; \
-nodes = [r for r, _, _ in os.walk('/comfyui/custom_nodes') if 'eactor' in r.lower()]; \
-print('ReActor:', nodes[:1]); \
-sys.exit(('ontbreekt: ' + str(missing)) if missing else (0 if nodes else 'ReActor is niet geinstalleerd'))"
+# Liever de build laten vallen dan een generatie. Dit controleert niet alleen
+# of de bestanden er staan, maar IMPORTEERT de node zoals ComfyUI dat doet -
+# want de eerste geslaagde build leverde een image op waarin ReActor wel op
+# schijf stond maar niet kon laden, en dat merkte je pas bij de eerste
+# gezichtswissel.
+COPY check_build.py /tmp/check_build.py
+RUN python /tmp/check_build.py && rm -f /tmp/check_build.py
 
 # RunPods GitHub-build controleert of de Dockerfile een handler aanroept en
 # weigert de repo anders met "runpod.serverless.start() handler not found".
