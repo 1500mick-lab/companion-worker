@@ -68,14 +68,41 @@ RUN set -eux; \
 # groot bestand telt zo niet op bij de rest; en bij een wijziging hoeft alleen
 # de betreffende laag opnieuw.
 
-# De checkpoint waar alle foto's op draaien. Origineel van Civitai, dat een
-# token eist; dit is een mirror die byte voor byte hetzelfde bestand levert
-# (6.938.041.176 bytes, gecontroleerd tegen het exemplaar dat op het volume
-# stond) en geen token nodig heeft.
-RUN comfy model download \
-      --url https://huggingface.co/useracctu/pornworks-real-porn-photo-realistic-nsfw-sdxl-and-pony-chekpoint/resolve/main/pornworksRealPornPhoto_ponyV04.safetensors \
-      --relative-path models/checkpoints \
-      --filename pornworksRealPornPhoto_ponyV04.safetensors
+# De checkpoint waar alle foto's op draaien.
+#
+# Origineel van Civitai, dat een token eist, dus de bouwmachine kan daar niet
+# bij. Deze mirrors leveren byte voor byte hetzelfde bestand: alle zes melden
+# 6938041176 bytes en dezelfde inhoudshash
+# (f7f7bf9dd05a0da64a58ce442d1ef7d0e38c6953bc7065757ec49a6b803fedfc), en die
+# grootte komt exact overeen met het exemplaar dat op het volume stond.
+#
+# Meerdere bronnen op een rij, want dit zijn kopieen die iemand vrijwillig
+# host; verdwijnt er een, dan zou de hele build stuklopen op het enige model
+# waar niets zonder werkt. De grootte wordt na afloop gecontroleerd, zodat een
+# halve download hier faalt en niet pas bij de eerste generatie.
+RUN set -eu; \
+    dest=/comfyui/models/checkpoints/pornworksRealPornPhoto_ponyV04.safetensors; \
+    expected=6938041176; \
+    file=pornworksRealPornPhoto_ponyV04.safetensors; \
+    mkdir -p "$(dirname "$dest")"; \
+    for repo in \
+        AI-Porn/pornworks-real-porn-photo-realistic-nsfw-sdxl-and-pony-chekpoint \
+        Manjushri/pornworks-real-porn-photo-realistic-nsfw-sdxl-and-pony-chekpoint \
+        useracctu/pornworks-real-porn-photo-realistic-nsfw-sdxl-and-pony-chekpoint \
+        berserkronin/pornworks-real-porn-photo-realistic-nsfw-sdxl-and-pony-chekpoint \
+        ManuelZnnmc/pornworks-real-porn-photo-realistic-nsfw-sdxl-and-pony-chekpoint \
+    ; do \
+        echo "proberen: $repo"; \
+        if curl -fL --retry 3 --retry-delay 5 -o "$dest" \
+             "https://huggingface.co/$repo/resolve/main/$file"; then \
+            got=$(stat -c %s "$dest"); \
+            if [ "$got" = "$expected" ]; then echo "gelukt via $repo ($got bytes)"; break; fi; \
+            echo "verkeerde grootte van $repo: $got in plaats van $expected"; \
+        fi; \
+        rm -f "$dest"; \
+    done; \
+    test -s "$dest"; \
+    test "$(stat -c %s "$dest")" = "$expected"
 
 # Stable Video Diffusion, voor de videoknop.
 RUN comfy model download \
