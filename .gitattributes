@@ -1,0 +1,4 @@
+# Docker chokes on CRLF in RUN continuations, and this repo is authored on
+# Windows. Force LF for everything that ends up inside the image.
+* text=auto eol=lf
+Dockerfile text eol=lf
