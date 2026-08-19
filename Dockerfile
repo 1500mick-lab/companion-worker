@@ -1,58 +1,67 @@
-# ComfyUI worker with face swapping.
+# ComfyUI worker met face swap.
 #
-# The stock runpod/worker-comfyui image has no custom nodes, and RunPod's own
-# documentation is explicit that a network volume cannot supply them:
-# "not suitable for installing custom nodes; use the Custom Dockerfile method
-# for that". Face swapping needs ReActor, so the image has to be built.
+# Het standaard-image runpod/worker-comfyui heeft geen custom nodes, en
+# RunPods eigen documentatie is daar stellig over: een network volume kan
+# modellen leveren maar geen nodes — "not suitable for installing custom
+# nodes; use the Custom Dockerfile method for that". Gezichtsconsistentie
+# werkt met ReActor, en dat is een custom node. Vandaar dit image.
 #
-# Models are NOT baked in. They live on the network volume, which keeps this
-# image small and means swapping a checkpoint does not mean a rebuild. The
-# one exception is the insightface detection pack (buffalo_l), which
-# insightface insists on unpacking from a zip into its own directory layout —
-# far easier to do once at build time than to reproduce on a volume.
+# Modellen zitten hier bewust NIET in. Die staan op het network volume, wat
+# dit image klein houdt en betekent dat een ander model geen herbouw kost.
+# De enige uitzondering is buffalo_l: insightface wil die uit een zip in een
+# eigen maplayout hebben, wat op een volume onhandiger is dan hier.
 
 FROM runpod/worker-comfyui:5.8.6-base
 
-# ReActor: ReActorFaceSwap / ReActorFaceSwapOpt for the swap,
-# ReActorRestoreFace / ReActorRestoreFaceAdvanced for the restoration pass.
-RUN comfy-node-install comfyui-reactor
+# insightface compileert vanaf broncode (geen wheel voor deze combinatie), en
+# heeft daarvoor een C++-toolchain plus cmake nodig. Ontbreken die, dan faalt
+# de pip-install met een weinig zeggende foutmelding over een missende
+# compiler.
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends build-essential cmake git unzip && \
+    rm -rf /var/lib/apt/lists/*
 
-# The upstream node ships a nudity classifier — the README calls the project
-# "SFW-Friendly" with "a nudity detector to avoid using this software with
-# 18+ content" — and there is no documented switch to turn it off. It returns
-# a black image for anything it flags, and, worse, nsfw_image() returns True
-# when the classifier merely FAILS TO LOAD, so a hiccup downloading it would
-# blank every generation.
+# Rechtstreeks van GitHub, niet via `comfy-node-install <naam>`: ReActor staat
+# niet in het Comfy-register, dus een naam zou hier niet oplossen. Een
+# vastgezette clone is bovendien reproduceerbaar.
+RUN git clone --depth 1 https://github.com/Gourieff/ComfyUI-ReActor.git \
+      /comfyui/custom_nodes/ComfyUI-ReActor && \
+    python -m pip install --no-cache-dir \
+      -r /comfyui/custom_nodes/ComfyUI-ReActor/requirements.txt
+
+# De node bevat een nuditeitsclassifier — de README noemt het project
+# "SFW-Friendly" met "a nudity detector to avoid using this software with 18+
+# content" — en er is geen gedocumenteerde schakelaar om dat uit te zetten.
+# Hij geeft een zwart beeld terug bij wat hij afkeurt, en erger: nsfw_image()
+# geeft óók True terug als het model niet laadt, dus één mislukte download zou
+# élke generatie blanco maken.
 #
-# This deployment generates adult content by design, on a private, single-user
-# instance. The check is therefore neutralised here rather than worked around
-# at runtime. Appending a redefinition rather than editing the original body
-# keeps the patch working if upstream rewrites the internals.
+# Deze installatie genereert bewust volwassen materiaal, op een privé-instantie
+# met één gebruiker. De controle wordt daarom hier uitgeschakeld in plaats van
+# tijdens runtime omzeild. Een herdefinitie erachter plakken (in plaats van de
+# oorspronkelijke functie bewerken) houdt de patch werkend als upstream de
+# binnenkant herschrijft.
 RUN set -eux; \
-    f="$(find / -name reactor_sfw.py -path '*eactor*' | head -1)"; \
+    f="$(find /comfyui/custom_nodes -name reactor_sfw.py | head -1)"; \
     test -n "$f"; \
-    printf '\n\n# Overridden at build time — see the Dockerfile.\ndef nsfw_image(img_data, model_path: str):\n    return False\n' >> "$f"; \
+    printf '\n\n# Uitgeschakeld tijdens de build — zie de Dockerfile.\ndef nsfw_image(img_data, model_path: str):\n    return False\n' >> "$f"; \
     tail -4 "$f"
 
-# buffalo_l is the face detection/recognition pack insightface uses to find
-# and encode a face. It is distributed as a zip that has to be expanded into
-# a specific directory, so it is fetched at build time instead of being put
-# on the volume as a loose file.
+# buffalo_l is de detectie- en herkenningsset waarmee insightface een gezicht
+# vindt en codeert. Hij komt als zip die in een specifieke map uitgepakt moet
+# worden, dus die halen we hier binnen in plaats van los op het volume.
 RUN set -eux; \
-    mkdir -p /comfyui/models/insightface/models; \
-    cd /comfyui/models/insightface/models; \
-    curl -fsSL -o buffalo_l.zip \
+    mkdir -p /comfyui/models/insightface/models/buffalo_l; \
+    cd /comfyui/models/insightface/models/buffalo_l; \
+    curl -fsSL -o /tmp/buffalo_l.zip \
       https://github.com/deepinsight/insightface/releases/download/v0.7/buffalo_l.zip; \
-    mkdir -p buffalo_l; \
-    cd buffalo_l; \
-    unzip -o ../buffalo_l.zip; \
-    rm -f ../buffalo_l.zip; \
+    unzip -o /tmp/buffalo_l.zip; \
+    rm -f /tmp/buffalo_l.zip; \
     ls -la
 
-# Fail the build rather than a generation: a missing node here shows up at
-# request time as an unhelpful "node type not found" from ComfyUI.
-RUN python -c "\
-import os,sys;\
-hits=[r for r,_,f in os.walk('/comfyui/custom_nodes') if 'eactor' in r.lower()];\
-print('ReActor at:', hits[:1]);\
-sys.exit(0 if hits else 'ReActor node was not installed')"
+# Liever de build laten falen dan een generatie: een node die er niet is komt
+# er tijdens een request uit als een nietszeggende "node type not found".
+RUN python -c "import os, sys; \
+hits = [r for r, _, _ in os.walk('/comfyui/custom_nodes') if 'eactor' in r.lower()]; \
+print('ReActor gevonden in:', hits[:1]); \
+sys.exit(0 if hits else 'ReActor is niet geinstalleerd')"
