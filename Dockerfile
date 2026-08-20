@@ -34,10 +34,24 @@ FROM runpod/worker-comfyui:5.8.6-base
 # libGL, dat in een kaal container-image ontbreekt; zonder deze twee faalt de
 # import van cv2 en daarmee de hele node - stil, want ComfyUI slaat een node
 # die niet importeert gewoon over.
-RUN apt-get update && \
+# Ubuntu 24.04 hernoemde libglib2.0-0 naar libglib2.0-0t64 (de 64-bits
+# time_t-overgang), en libgl1-mesa-glx heet daar alleen nog libgl1. Welke naam
+# bestaat hangt af van de release van het basis-image, dus beide worden
+# geprobeerd; pas als geen van beide er is valt de build om. De ctypes-regel
+# controleert daarna dat libGL echt laadbaar is, want dat is wat cv2 nodig
+# heeft - en een cv2 die niet importeert neemt stilzwijgend de hele node mee.
+#
+# GEEN commentaarregels binnen deze RUN: een regel die op \ eindigt plakt aan
+# de volgende, en een # daarin zou de rest van het commando wegcommentarieren.
+RUN set -eux; \
+    apt-get update; \
     apt-get install -y --no-install-recommends \
-      build-essential cmake git unzip curl ca-certificates \
-      libgl1 libglib2.0-0 && \
+      build-essential cmake git unzip curl ca-certificates; \
+    apt-get install -y --no-install-recommends libgl1 || \
+      apt-get install -y --no-install-recommends libgl1-mesa-glx; \
+    apt-get install -y --no-install-recommends libglib2.0-0t64 || \
+      apt-get install -y --no-install-recommends libglib2.0-0; \
+    python -c "import ctypes; ctypes.CDLL('libGL.so.1'); print('libGL ok')"; \
     rm -rf /var/lib/apt/lists/*
 
 # Rechtstreeks van GitHub, niet via `comfy-node-install <naam>`: ReActor staat
