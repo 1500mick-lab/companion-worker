@@ -160,6 +160,43 @@ RUN comfy model download \
       --relative-path models/facerestore_models \
       --filename codeformer-v0.1.0.pth
 
+# GPEN-BFR-512 als alternatieve restauratie. De ontwikkelaar die ReActors
+# HyperSwap-ondersteuning schreef meldt dat inswapper met GPEN-BFR-512 op
+# zichtbaarheid 0.7 de beste gelijkenis geeft die hij kent - beter dan
+# CodeFormer, en juist sterker in gezichtsdetail zoals de mond.
+RUN comfy model download \
+      --url https://huggingface.co/datasets/Gourieff/ReActor/resolve/main/models/facerestore_models/GPEN-BFR-512.onnx \
+      --relative-path models/facerestore_models \
+      --filename GPEN-BFR-512.onnx
+
+# HyperSwap werkt op 256x256 in plaats van de 128x128 van inswapper. Dat is
+# vier keer zoveel gezichtsinformatie, en het verschil dat ertoe doet zodra
+# het gezicht in beeld groter is dan 128 pixels - wat bij een portret van
+# 832x1216 altijd zo is. FaceFusion, dat het model maakte, heeft het in 3.3.2
+# tot standaard gemaakt in plaats van inswapper.
+#
+# ReActor kiest het model op de BESTANDSNAAM: bevat die "hyperswap", dan
+# gebruikt hij de HyperSwapper-klasse en zoekt hij in models/hyperswap. Deze
+# bestanden dus niet hernoemen.
+#
+# Alle drie de varianten, want 1a/1b/1c zijn geen snelheidsniveaus maar
+# afzonderlijk getrainde modellen - even groot, zelfde graaf. Welke op een
+# bepaald gezicht het beste werkt is niet te voorspellen.
+RUN set -eux; \
+    for v in 1a 1b 1c; do \
+      comfy model download \
+        --url "https://huggingface.co/datasets/Gourieff/ReActor/resolve/main/models/hyperswap_${v}_256.onnx" \
+        --relative-path models/hyperswap \
+        --filename "hyperswap_${v}_256.onnx"; \
+    done; \
+    ls -la /comfyui/models/hyperswap
+
+# Zie de toelichting in het script: ReActor voert HyperSwap een uitsnede die
+# 22,4% te ver is ingezoomd. Dit zet de uitlijning gelijk aan wat FaceFusion
+# gebruikt, en faalt als de code upstream is veranderd.
+COPY patch_hyperswap.py /tmp/patch_hyperswap.py
+RUN python /tmp/patch_hyperswap.py && rm -f /tmp/patch_hyperswap.py
+
 # Liever de build laten vallen dan een generatie. Dit controleert niet alleen
 # of de bestanden er staan, maar IMPORTEERT de node zoals ComfyUI dat doet -
 # want de eerste geslaagde build leverde een image op waarin ReActor wel op

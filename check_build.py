@@ -35,6 +35,10 @@ MODELS = [
     "models/insightface/inswapper_128.onnx",
     "models/facerestore_models/codeformer-v0.1.0.pth",
     "models/insightface/models/buffalo_l",
+    "models/hyperswap/hyperswap_1a_256.onnx",
+    "models/hyperswap/hyperswap_1b_256.onnx",
+    "models/hyperswap/hyperswap_1c_256.onnx",
+    "models/facerestore_models/GPEN-BFR-512.onnx",
 ]
 
 # Wat de node importeert en wat zonder GPU te controleren is. insightface en
@@ -97,6 +101,17 @@ else:
         else:
             print("  MIST %s" % want)
             problems.append("node niet geregistreerd in nodes.py: " + want)
+
+print("== hyperswap-uitlijning ==")
+hs = os.path.join(NODE_DIR, "reactor_core", "hyperswap.py")
+if os.path.isfile(hs):
+    text = open(hs, encoding="utf-8").read()
+    if "92.589" in text and "84.87" not in text:
+        print("  ok   gecorrigeerd naar FaceFusions arcface_128@256")
+    else:
+        problems.append("de hyperswap-uitlijning is niet gepatcht")
+else:
+    problems.append("reactor_core/hyperswap.py ontbreekt")
 
 print("== nsfw-controle uitgeschakeld ==")
 sfw = os.path.join(NODE_DIR, "scripts", "reactor_sfw.py")
