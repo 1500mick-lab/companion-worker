@@ -197,6 +197,35 @@ RUN set -eux; \
 COPY patch_hyperswap.py /tmp/patch_hyperswap.py
 RUN python /tmp/patch_hyperswap.py && rm -f /tmp/patch_hyperswap.py
 
+# ---- wat ReActor anders TIJDENS HET DRAAIEN ophaalt ----
+#
+# Dit was de echte oorzaak van een eerste gezichtswissel die 357 seconden
+# duurde terwijl de tweede er 9 nodig had. Een serverless container begint
+# elke koude start met een lege schijf, dus die download gebeurde telkens
+# opnieuw.
+#
+# r_facelib/utils/misc.py rekent het doelpad uit als ROOT_DIR/../../models/
+# facedetection, oftewel /comfyui/models/facedetection, en de bestandsnaam is
+# simpelweg de laatste component van de URL. De enige cachecontrole is
+# os.path.exists(), dus het bestand hier neerzetten schakelt de download
+# volledig uit.
+#
+# parsing_parsenet.pth is niet optioneel: init_parsing_model staat NIET achter
+# de use_parse-vlag, dus die wordt opgehaald zodra er uberhaupt gerestaureerd
+# wordt, ongeacht welke instellingen je kiest.
+#
+# De laatste twee zijn de alternatieve detectoren. Klein genoeg om mee te
+# nemen, en anders betaal je alsnog een download op het moment dat je ooit
+# van detector wisselt.
+RUN set -eux; \
+    mkdir -p /comfyui/models/facedetection; \
+    cd /comfyui/models/facedetection; \
+    curl -fSL --retry 3 -O https://github.com/xinntao/facexlib/releases/download/v0.1.0/detection_Resnet50_Final.pth; \
+    curl -fSL --retry 3 -O https://github.com/sczhou/CodeFormer/releases/download/v0.1.0/parsing_parsenet.pth; \
+    curl -fSL --retry 3 -O https://github.com/xinntao/facexlib/releases/download/v0.1.0/detection_mobilenet0.25_Final.pth; \
+    curl -fSL --retry 3 -O https://github.com/sczhou/CodeFormer/releases/download/v0.1.0/yolov5n-face.pth; \
+    ls -la
+
 # Liever de build laten vallen dan een generatie. Dit controleert niet alleen
 # of de bestanden er staan, maar IMPORTEERT de node zoals ComfyUI dat doet -
 # want de eerste geslaagde build leverde een image op waarin ReActor wel op

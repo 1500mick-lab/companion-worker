@@ -39,7 +39,18 @@ MODELS = [
     "models/hyperswap/hyperswap_1b_256.onnx",
     "models/hyperswap/hyperswap_1c_256.onnx",
     "models/facerestore_models/GPEN-BFR-512.onnx",
+    # Deze twee haalde ReActor tijdens het draaien op - 186 MB per koude
+    # start, want de container begint elke keer leeg. parsing_parsenet is
+    # niet optioneel: init_parsing_model staat niet achter de use_parse-vlag.
+    "models/facedetection/detection_Resnet50_Final.pth",
+    "models/facedetection/parsing_parsenet.pth",
 ]
+
+# buffalo_l bevat vijf modellen. De bestaanscontrole van ReActor kijkt maar
+# naar drie ervan; ontbreken de andere twee, dan worden die stilzwijgend
+# overgeslagen - geen fout, alleen slechtere landmarkdetectie.
+BUFFALO = ["det_10g.onnx", "w600k_r50.onnx", "genderage.onnx",
+           "2d106det.onnx", "1k3d68.onnx"]
 
 # Wat de node importeert en wat zonder GPU te controleren is. insightface en
 # cv2 staan bovenaan: die twee waren de daadwerkelijke storing.
@@ -71,6 +82,19 @@ for rel in MODELS:
     else:
         print("  MIST %s" % rel)
         problems.append("ontbreekt: " + rel)
+
+print("== buffalo_l compleet ==")
+bl = os.path.join(COMFY, "models/insightface/models/buffalo_l")
+if os.path.isdir(bl):
+    have = set(os.listdir(bl))
+    for f in BUFFALO:
+        if f in have:
+            print("  ok   %s" % f)
+        else:
+            print("  MIST %s" % f)
+            problems.append("buffalo_l mist " + f)
+else:
+    problems.append("buffalo_l map ontbreekt")
 
 print("== python-pakketten ==")
 for name, why in IMPORTS:
