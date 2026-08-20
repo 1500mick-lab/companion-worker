@@ -44,6 +44,7 @@ MODELS = [
     # niet optioneel: init_parsing_model staat niet achter de use_parse-vlag.
     "models/facedetection/detection_Resnet50_Final.pth",
     "models/facedetection/parsing_parsenet.pth",
+    "models/facerestore_models/GPEN-BFR-1024.onnx",
 ]
 
 # buffalo_l bevat vijf modellen. De bestaanscontrole van ReActor kijkt maar
@@ -65,7 +66,7 @@ IMPORTS = [
 ]
 
 # De nodes waar de app op leunt.
-REQUIRED_NODES = ["ReActorFaceSwap"]
+REQUIRED_NODES = ["ReActorFaceSwap", "ReActorRestoreFace"]
 
 problems = []
 
@@ -125,6 +126,26 @@ else:
         else:
             print("  MIST %s" % want)
             problems.append("node niet geregistreerd in nodes.py: " + want)
+
+print("== videohelpersuite ==")
+vhs = os.path.join(COMFY, "custom_nodes", "ComfyUI-VideoHelperSuite")
+if os.path.isdir(vhs):
+    print("  ok   node aanwezig")
+else:
+    problems.append("ComfyUI-VideoHelperSuite ontbreekt")
+
+print("== handler leest video-uitvoer ==")
+# Zonder deze patch geeft VHS niets terug: de worker kijkt alleen naar
+# "images" en VHS schrijft onder "gifs". Dat faalt stil, dus het hoort een
+# build-fout te zijn en geen verrassing bij de eerste clip.
+handler = "/handler.py"
+if os.path.isfile(handler):
+    if 'node_output.pop("gifs")' in open(handler, encoding="utf-8").read():
+        print("  ok   gifs worden als images opgehaald")
+    else:
+        problems.append("de handler-patch voor video-uitvoer ontbreekt")
+else:
+    problems.append("/handler.py ontbreekt")
 
 print("== hyperswap-uitlijning ==")
 hs = os.path.join(NODE_DIR, "reactor_core", "hyperswap.py")

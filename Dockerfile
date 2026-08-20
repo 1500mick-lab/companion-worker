@@ -169,6 +169,15 @@ RUN comfy model download \
       --relative-path models/facerestore_models \
       --filename GPEN-BFR-512.onnx
 
+# GPEN-BFR-1024 voor meer detail in het gezicht. ReActor leest de werkgrootte
+# UIT DE BESTANDSNAAM - r_faceboost/restorer.py doet letterlijk
+# `if "1024" in face_restore_model.lower(): face_size = 1024`. Dit bestand mag
+# dus nooit hernoemd worden, anders draait hij alsnog op 512.
+RUN comfy model download \
+      --url https://huggingface.co/datasets/Gourieff/ReActor/resolve/main/models/facerestore_models/GPEN-BFR-1024.onnx \
+      --relative-path models/facerestore_models \
+      --filename GPEN-BFR-1024.onnx
+
 # HyperSwap werkt op 256x256 in plaats van de 128x128 van inswapper. Dat is
 # vier keer zoveel gezichtsinformatie, en het verschil dat ertoe doet zodra
 # het gezicht in beeld groter is dan 128 pixels - wat bij een portret van
@@ -233,6 +242,26 @@ RUN set -eux; \
 # gezichtswissel.
 COPY check_build.py /tmp/check_build.py
 RUN python /tmp/check_build.py && rm -f /tmp/check_build.py
+
+# VideoHelperSuite, zodat de worker een clip als EEN mp4 teruggeeft in plaats
+# van als losse frames. Dat is niet cosmetisch: RunPod begrenst hoe groot een
+# job-antwoord mag zijn, en 25 frames als base64-PNG ging daaroverheen - de
+# job meldde COMPLETED en gaf niets terug.
+RUN git clone --depth 1 https://github.com/Kosinkadink/ComfyUI-VideoHelperSuite.git \
+      /comfyui/custom_nodes/ComfyUI-VideoHelperSuite && \
+    python -m pip install --no-cache-dir \
+      -r /comfyui/custom_nodes/ComfyUI-VideoHelperSuite/requirements.txt
+
+# VideoHelperSuite roept ffmpeg aan voor alles wat geen gif is.
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends ffmpeg && \
+    rm -rf /var/lib/apt/lists/* && \
+    ffmpeg -version | head -1
+
+# Zonder deze patch levert VideoHelperSuite niets op: de worker leest alleen
+# de sleutel "images" en VHS schrijft onder "gifs". Zie het script.
+COPY patch_handler.py /tmp/patch_handler.py
+RUN python /tmp/patch_handler.py && rm -f /tmp/patch_handler.py
 
 # RunPods GitHub-build controleert of de Dockerfile een handler aanroept en
 # weigert de repo anders met "runpod.serverless.start() handler not found".
