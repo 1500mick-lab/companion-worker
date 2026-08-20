@@ -235,14 +235,6 @@ RUN set -eux; \
     curl -fSL --retry 3 -O https://github.com/sczhou/CodeFormer/releases/download/v0.1.0/yolov5n-face.pth; \
     ls -la
 
-# Liever de build laten vallen dan een generatie. Dit controleert niet alleen
-# of de bestanden er staan, maar IMPORTEERT de node zoals ComfyUI dat doet -
-# want de eerste geslaagde build leverde een image op waarin ReActor wel op
-# schijf stond maar niet kon laden, en dat merkte je pas bij de eerste
-# gezichtswissel.
-COPY check_build.py /tmp/check_build.py
-RUN python /tmp/check_build.py && rm -f /tmp/check_build.py
-
 # VideoHelperSuite, zodat de worker een clip als EEN mp4 teruggeeft in plaats
 # van als losse frames. Dat is niet cosmetisch: RunPod begrenst hoe groot een
 # job-antwoord mag zijn, en 25 frames als base64-PNG ging daaroverheen - de
@@ -262,6 +254,14 @@ RUN apt-get update && \
 # de sleutel "images" en VHS schrijft onder "gifs". Zie het script.
 COPY patch_handler.py /tmp/patch_handler.py
 RUN python /tmp/patch_handler.py && rm -f /tmp/patch_handler.py
+
+# Liever de build laten vallen dan een generatie. Dit controleert niet alleen
+# of de bestanden er staan, maar IMPORTEERT de node zoals ComfyUI dat doet -
+# want de eerste geslaagde build leverde een image op waarin ReActor wel op
+# schijf stond maar niet kon laden, en dat merkte je pas bij de eerste
+# gezichtswissel.
+COPY check_build.py /tmp/check_build.py
+RUN python /tmp/check_build.py && rm -f /tmp/check_build.py
 
 # RunPods GitHub-build controleert of de Dockerfile een handler aanroept en
 # weigert de repo anders met "runpod.serverless.start() handler not found".
