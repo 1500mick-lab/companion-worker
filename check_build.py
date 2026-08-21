@@ -8,16 +8,17 @@ eerste gezichtswissel kwam er "Node 'ReActorFaceSwap' not found" uit. De
 oorzaak lag drie stappen eerder: insightface staat niet in de requirements.txt
 van de node en werd dus nooit geinstalleerd.
 
-Wat hier NIET gebeurt is de node volledig laden. Dat werd geprobeerd en het
-faalt altijd: ReActor importeert comfy.model_management, en ComfyUI roept
-tijdens dat importeren torch.cuda.current_device() aan. RunPods bouwmachines
-hebben geen GPU, dus dat eindigt gegarandeerd in "Found no NVIDIA driver" -
-een fout over de bouwomgeving, niet over het image.
+Er wordt getest wat er zonder GPU te testen valt: staan de modellen er, zijn
+de python-pakketten aanwezig, registreert de broncode de nodes - en, sinds de
+InstantID-build, of de nodes ook echt IMPORTEREN.
 
-In plaats daarvan wordt getest wat wel te testen valt zonder GPU: staan de
-modellen er, zijn de python-pakketten die de node importeert aanwezig, en
-registreert de broncode de node die de app aanroept. Precies die eerste
-storing - insightface ontbreekt - wordt hiermee gevangen.
+Dat laatste heette hier lang onmogelijk, omdat ComfyUI tijdens het importeren
+torch.cuda.current_device() aanroept en bouwmachines geen GPU hebben. Dat was
+een verkeerde conclusie: ComfyUI heeft een --cpu-vlag, en cli_args leest
+sys.argv tijdens het importeren. De import draait daarom in een apart proces
+met die vlag gezet. Het gat dat daarmee dichtgaat is duur gebleken - een node
+die niet importeert wordt door ComfyUI stilzwijgend overgeslagen, dus de build
+slaagde en de storing kwam pas bij de eerste generatie boven.
 """
 
 import importlib
@@ -273,6 +274,72 @@ if os.path.isfile(sfw):
         problems.append("de nsfw-patch staat niet in reactor_sfw.py")
 else:
     print("  (geen reactor_sfw.py gevonden - upstream kan het hernoemd hebben)")
+
+print("== custom nodes laden echt ==")
+# Dit ontbrak, en dat heeft twee keer een build gekost.
+#
+# De aanname bovenin dit bestand was dat een echte import onmogelijk is zonder
+# GPU. Dat klopt niet: ComfyUI heeft een --cpu-modus, en cli_args leest sys.argv
+# tijdens het importeren. Zet die vlag en model_management kiest de processor in
+# plaats van torch.cuda.current_device() aan te roepen.
+#
+# Waarom het moet: ComfyUI slaat een node die niet importeert STILZWIJGEND over.
+# Het image is dan compleet, de build slaagt, de worker start - en pas bij de
+# eerste generatie krijg je "Node ... not found". Alles hierboven kijkt alleen
+# of de bestanden er staan en of de broncode de node registreert; geen van beide
+# zegt iets over of hij daadwerkelijk laadt.
+def probeer_import(naam):
+    """Importeert een custom node in een APART proces.
+
+    Apart, omdat ComfyUI importeren globale staat verandert - argv, logging,
+    de gekozen rekenkant - en dat mag de rest van deze controle niet raken."""
+    import subprocess
+
+    code = "\n".join([
+        "import sys",
+        "sys.argv = ['check', '--cpu']",
+        "sys.path.insert(0, '/comfyui')",
+        "sys.path.insert(0, '/comfyui/custom_nodes')",
+        "import importlib",
+        "m = importlib.import_module(%r)" % naam,
+        "n = getattr(m, 'NODE_CLASS_MAPPINGS', {})",
+        "print('GELADEN:', ', '.join(sorted(n)) or '(geen mappings)')",
+    ])
+    return subprocess.run([sys.executable, "-c", code], cwd="/comfyui",
+                          capture_output=True, text=True, timeout=900)
+
+
+GEEN_GPU = re.compile(r"no NVIDIA driver|CUDA driver|nvidia-smi|torch\.cuda", re.I)
+
+for pakket, verplicht in (("ComfyUI_InstantID", INSTANTID_NODES),
+                          ("ComfyUI-ReActor", REQUIRED_NODES)):
+    try:
+        r = probeer_import(pakket)
+    except Exception as e:
+        print("  (kon %s niet testen: %s)" % (pakket, str(e)[:120]))
+        continue
+    uit = (r.stdout or "") + (r.stderr or "")
+    if r.returncode == 0 and "GELADEN:" in r.stdout:
+        geladen = r.stdout.split("GELADEN:", 1)[1].strip()
+        print("  ok   %-20s %s" % (pakket, geladen[:200]))
+        ontbreekt = [n for n in verplicht if n not in geladen]
+        if ontbreekt:
+            problems.append("%s laadt, maar registreert niet: %s"
+                            % (pakket, ", ".join(ontbreekt)))
+    else:
+        # De uitvoer wordt ALTIJD getoond, ook als dit geen afkeuring wordt.
+        # Anders levert een mislukte poging een build op die slaagt en niets
+        # verklaart, en dan is de hele stap een gemiste bouwronde waard.
+        print("  %s importeerde niet. Laatste regels:" % pakket)
+        for regel in uit.strip().split("\n")[-30:]:
+            print("       " + regel)
+        if GEEN_GPU.search(uit):
+            # De bouwmachine heeft geen kaart en --cpu hielp hier niet. Dat
+            # zegt niets over het image, dus geen reden om af te keuren.
+            print("  (niet te testen op een machine zonder GPU - geen afkeuring)")
+        else:
+            problems.append("%s kan niet geimporteerd worden - zie de melding hierboven"
+                            % pakket)
 
 if problems:
     print("\n== BUILD AFGEKEURD ==")
