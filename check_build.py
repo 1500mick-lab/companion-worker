@@ -190,17 +190,45 @@ else:
             print("  MIST %s" % want)
             problems.append("node niet geregistreerd: " + want)
 
-print("== onnxruntime draait op de GPU ==")
-# De requirements van InstantID bevatten een kale `onnxruntime`. Die naast
-# onnxruntime-gpu installeren geeft twee pakketten die dezelfde module
-# claimen, en dan valt de swap stilletjes terug op de CPU.
+print("== onnxruntime is de GPU-variant ==")
+# insightface hangt aan de CPU-variant `onnxruntime`. Staan beide pakketten
+# geinstalleerd, dan schrijven ze in dezelfde map en wint degene die als
+# laatste is uitgepakt - jarenlang stilzwijgend de CPU-versie, waardoor de
+# swap gewoon werkte maar op de processor draaide.
+#
+# Er wordt hier NIET op get_available_providers() gecontroleerd. Dat lijkt de
+# voor de hand liggende test, maar bouwmachines van RunPod hebben geen GPU en
+# geen CUDA-bibliotheken, dus de CUDA-provider kan daar sowieso niet laden.
+# Wat wel klopt ongeacht de hardware: welk pakket er geinstalleerd staat, en
+# of de CUDA-bibliotheek van dat pakket op schijf staat.
+import importlib.metadata as md
+
+try:
+    md.version("onnxruntime")
+    problems.append(
+        "de CPU-variant `onnxruntime` staat geinstalleerd naast onnxruntime-gpu "
+        "en overschrijft diens bibliotheken - zie de pip-stap in de Dockerfile")
+except md.PackageNotFoundError:
+    print("  ok   CPU-variant is niet geinstalleerd")
+
+try:
+    print("  ok   onnxruntime-gpu %s" % md.version("onnxruntime-gpu"))
+except md.PackageNotFoundError:
+    problems.append("onnxruntime-gpu ontbreekt")
+
 try:
     import onnxruntime
-    providers = onnxruntime.get_available_providers()
-    if "CUDAExecutionProvider" in providers:
-        print("  ok   %s" % ", ".join(providers))
+    capi = os.path.join(os.path.dirname(onnxruntime.__file__), "capi")
+    cuda_libs = [f for f in os.listdir(capi) if "providers_cuda" in f]
+    if cuda_libs:
+        print("  ok   %s" % ", ".join(cuda_libs))
     else:
-        problems.append("onnxruntime heeft geen CUDAExecutionProvider: %s" % providers)
+        problems.append(
+            "de CUDA-provider van onnxruntime staat niet op schijf: %s bevat geen "
+            "libonnxruntime_providers_cuda.so" % capi)
+    # Puur ter informatie; op een bouwmachine zonder GPU ontbreekt CUDA hier
+    # terecht, dus hier hangt geen oordeel aan.
+    print("  info providers hier: %s" % ", ".join(onnxruntime.get_available_providers()))
 except Exception as e:
     problems.append("onnxruntime niet importeerbaar: %s" % str(e)[:90])
 

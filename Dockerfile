@@ -68,7 +68,41 @@ RUN git clone --depth 1 https://github.com/Gourieff/ComfyUI-ReActor.git \
 # generatie alleen "Node 'ReActorFaceSwap' not found". Precies zo ging het de
 # eerste keer mis. Normaal regelt ComfyUI-Manager dit via de install.py van de
 # node; die draait hier niet.
-RUN python -m pip install --no-cache-dir insightface onnxruntime-gpu
+# DE VOLGORDE IS HIER HET HELE PUNT.
+#
+# `pip install insightface onnxruntime-gpu` lijkt te doen wat je wilt, maar
+# insightface heeft zelf een afhankelijkheid op de CPU-variant `onnxruntime`.
+# Pip haalde die er dus bij en installeerde in deze volgorde:
+#
+#   Installing collected packages: ... onnxruntime-gpu, onnxruntime, ...
+#
+# Beide pakketten schrijven in dezelfde map `onnxruntime/`, dus de CPU-versie
+# overschreef de native bibliotheek van de GPU-versie. Resultaat:
+# get_available_providers() gaf ['AzureExecutionProvider',
+# 'CPUExecutionProvider'] - geen CUDA. Dat stond zo sinds de allereerste
+# build, en het viel niet op omdat niets kapotgaat: de swap draait gewoon,
+# alleen op de processor.
+#
+# Daarom: eerst insightface (die de CPU-variant meebrengt), dan die er weer
+# af, dan de GPU-variant er overheen forceren zodat zijn bibliotheken de
+# laatste zijn die er staan. --force-reinstall is nodig omdat pip het pakket
+# anders als "al aanwezig" overslaat en de bestanden niet terugzet.
+# --no-deps bij de herinstallatie is geen detail: zonder die vlag haalt
+# --force-reinstall ook alle afhankelijkheden opnieuw op, inclusief numpy en
+# protobuf, en die staan hier onder torch. Een torch die na afloop tegen een
+# andere numpy aankijkt is een veel duurdere storing dan degene die hier
+# gerepareerd wordt. De afhankelijkheden staan er al; alleen het pakket zelf
+# moet opnieuw uitgepakt worden.
+#
+# `|| true` bij de uninstall omdat pip afwijkend kan afsluiten als het pakket
+# er niet is - bijvoorbeeld als insightface ooit stopt met die afhankelijkheid.
+# Dat is dan geen fout, en de controle aan het eind van de build stelt alsnog
+# vast of het resultaat klopt.
+RUN set -eux; \
+    python -m pip install --no-cache-dir insightface; \
+    python -m pip uninstall -y onnxruntime || true; \
+    python -m pip install --no-cache-dir --force-reinstall --no-deps onnxruntime-gpu; \
+    python -m pip show onnxruntime-gpu | head -2
 
 # De node bevat een nuditeitsclassifier - de README noemt het project
 # "SFW-Friendly" met "a nudity detector to avoid using this software with 18+
@@ -283,19 +317,19 @@ RUN python /tmp/patch_handler.py && rm -f /tmp/patch_handler.py
 # ReActor blijft staan. Het is snel, het werkt goed op afstand, en het is het
 # vangnet als InstantID met deze Pony-merge vecht over stijl.
 #
-# De requirements van de node worden GEFILTERD. Er staat een kale
-# `onnxruntime` in, en die naast onnxruntime-gpu installeren levert twee
-# pakketten die dezelfde module claimen - waarna de swap stilletjes op de CPU
-# belandt of helemaal breekt. De regel voor onnxruntime-gpu blijft wel staan.
+# De requirements van de node worden GEFILTERD, en wel op twee regels:
+# `onnxruntime` en `insightface`. Beide staan er al, en beide zouden de
+# CPU-variant van onnxruntime terugzetten - insightface omdat pip die als
+# ontbrekende afhankelijkheid ziet zodra hij hierboven verwijderd is. Wat
+# overblijft is `onnxruntime-gpu`, die al aanwezig is.
 RUN set -eux; \
     git clone --depth 1 https://github.com/cubiq/ComfyUI_InstantID.git \
       /comfyui/custom_nodes/ComfyUI_InstantID; \
-    grep -v -E '^[[:space:]]*onnxruntime[[:space:]]*$' \
+    grep -v -E '^[[:space:]]*(onnxruntime|insightface)[[:space:]]*$' \
       /comfyui/custom_nodes/ComfyUI_InstantID/requirements.txt > /tmp/instantid-req.txt; \
     echo "--- wat er geinstalleerd wordt:"; cat /tmp/instantid-req.txt; \
     python -m pip install --no-cache-dir -r /tmp/instantid-req.txt; \
-    rm -f /tmp/instantid-req.txt; \
-    python -c "import onnxruntime; ps = onnxruntime.get_available_providers(); print('providers:', ps); assert 'CUDAExecutionProvider' in ps, 'onnxruntime-gpu is verdrongen'"
+    rm -f /tmp/instantid-req.txt
 
 # Het IP-Adapter-deel van InstantID: de identiteitsinbedding.
 RUN comfy model download \
