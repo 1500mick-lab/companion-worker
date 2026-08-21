@@ -235,6 +235,12 @@ RUN set -eux; \
     curl -fSL --retry 3 -O https://github.com/sczhou/CodeFormer/releases/download/v0.1.0/yolov5n-face.pth; \
     ls -la
 
+# Upscalers, voor scherpere uitvoer: renderen op 832x1216 en daarna 4x
+# opschalen met RealESRGAN, terug naar 2x. Deze stonden op het oude volume en
+# waren nooit in het image beland - de eerste opschaalpoging faalde daarom op
+# "model_name not in []".
+RUN comfy model download       --url https://huggingface.co/ai-forever/Real-ESRGAN/resolve/main/RealESRGAN_x4.pth       --relative-path models/upscale_models       --filename RealESRGAN_x4.pth
+
 # VideoHelperSuite, zodat de worker een clip als EEN mp4 teruggeeft in plaats
 # van als losse frames. Dat is niet cosmetisch: RunPod begrenst hoe groot een
 # job-antwoord mag zijn, en 25 frames als base64-PNG ging daaroverheen - de

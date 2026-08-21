@@ -45,6 +45,7 @@ MODELS = [
     "models/facedetection/detection_Resnet50_Final.pth",
     "models/facedetection/parsing_parsenet.pth",
     "models/facerestore_models/GPEN-BFR-1024.onnx",
+    "models/upscale_models/RealESRGAN_x4.pth",
 ]
 
 # buffalo_l bevat vijf modellen. De bestaanscontrole van ReActor kijkt maar
