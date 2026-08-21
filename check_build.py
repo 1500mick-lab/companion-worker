@@ -46,6 +46,14 @@ MODELS = [
     "models/facedetection/parsing_parsenet.pth",
     "models/facerestore_models/GPEN-BFR-1024.onnx",
     "models/upscale_models/RealESRGAN_x4.pth",
+    # InstantID: identiteit tijdens het samplen in plaats van een swap erna.
+    "models/instantid/ip-adapter.bin",
+    "models/controlnet/instantid_diffusion_pytorch_model.safetensors",
+    "models/insightface/models/antelopev2",
+    # Maskeren, zodat de swap kan blijven staan waar iets voor haar gezicht
+    # langsloopt.
+    "models/ultralytics/bbox/face_yolov8m.pt",
+    "models/sams/sam_vit_b_01ec64.pth",
 ]
 
 # buffalo_l bevat vijf modellen. De bestaanscontrole van ReActor kijkt maar
@@ -53,6 +61,13 @@ MODELS = [
 # overgeslagen - geen fout, alleen slechtere landmarkdetectie.
 BUFFALO = ["det_10g.onnx", "w600k_r50.onnx", "genderage.onnx",
            "2d106det.onnx", "1k3d68.onnx"]
+
+# antelopev2 is de encoder van InstantID - een andere inbeddingsruimte dan
+# buffalo_l, dus geen vervanging maar een tweede set. De zip pakt uit met een
+# map antelopev2 erin; slaat de build die niet plat, dan staan deze bestanden
+# een niveau te diep en ziet insightface een lege modellijst.
+ANTELOPE = ["scrfd_10g_bnkps.onnx", "glintr100.onnx", "genderage.onnx",
+            "2d106det.onnx", "1k3d68.onnx"]
 
 # Wat de node importeert en wat zonder GPU te controleren is. insightface en
 # cv2 staan bovenaan: die twee waren de daadwerkelijke storing.
@@ -67,7 +82,12 @@ IMPORTS = [
 ]
 
 # De nodes waar de app op leunt.
-REQUIRED_NODES = ["ReActorFaceSwap", "ReActorRestoreFace"]
+REQUIRED_NODES = ["ReActorFaceSwap", "ReActorRestoreFace", "ReActorMaskHelper"]
+
+# InstantID registreert zijn nodes in een eigen bestand, niet in dat van
+# ReActor. ApplyInstantID is degene die de app aanroept; de andere twee laden
+# het model en analyseren het bronggezicht.
+INSTANTID_NODES = ["InstantIDModelLoader", "InstantIDFaceAnalysis", "ApplyInstantID"]
 
 problems = []
 
@@ -98,6 +118,23 @@ if os.path.isdir(bl):
 else:
     problems.append("buffalo_l map ontbreekt")
 
+print("== antelopev2 compleet ==")
+av = os.path.join(COMFY, "models/insightface/models/antelopev2")
+if os.path.isdir(av):
+    have = set(os.listdir(av))
+    if "antelopev2" in have:
+        problems.append(
+            "antelopev2 is niet platgeslagen: de modellen staan in "
+            "models/antelopev2/antelopev2/, waar insightface niet kijkt")
+    for f in ANTELOPE:
+        if f in have:
+            print("  ok   %s" % f)
+        else:
+            print("  MIST %s" % f)
+            problems.append("antelopev2 mist " + f)
+else:
+    problems.append("antelopev2 map ontbreekt")
+
 print("== python-pakketten ==")
 for name, why in IMPORTS:
     try:
@@ -108,16 +145,28 @@ for name, why in IMPORTS:
         print("  MIST %-18s %s" % (name, str(e)[:90]))
         problems.append("kan %s niet importeren%s" % (name, (" - " + why) if why else ""))
 
+def read_python(directory):
+    """Alle python in een node-map aan elkaar geplakt.
+
+    Niet alleen nodes.py: welke node in welk bestand staat is aan upstream,
+    en ReActorMaskHelper bleek elders geregistreerd. Een controle die maar in
+    een bestand kijkt keurt dan een prima image af."""
+    out = ""
+    for root, _dirs, files in os.walk(directory):
+        for name in files:
+            if name.endswith(".py"):
+                try:
+                    out += open(os.path.join(root, name), encoding="utf-8").read()
+                except Exception:
+                    traceback.print_exc()
+    return out
+
+
 print("== node geregistreerd ==")
-nodes_py = os.path.join(NODE_DIR, "nodes.py")
-if not os.path.isfile(nodes_py):
-    problems.append("ComfyUI-ReActor/nodes.py staat er niet")
+if not os.path.isdir(NODE_DIR):
+    problems.append("ComfyUI-ReActor staat er niet")
 else:
-    try:
-        source = open(nodes_py, encoding="utf-8").read()
-    except Exception:
-        traceback.print_exc()
-        source = ""
+    source = read_python(NODE_DIR)
     for want in REQUIRED_NODES:
         # De registratie is een sleutel in NODE_CLASS_MAPPINGS; een losse
         # klassenaam zegt niets, want die kan gedefinieerd zijn zonder ooit
@@ -127,6 +176,33 @@ else:
         else:
             print("  MIST %s" % want)
             problems.append("node niet geregistreerd in nodes.py: " + want)
+
+print("== instantid geregistreerd ==")
+iid_dir = os.path.join(COMFY, "custom_nodes", "ComfyUI_InstantID")
+iid_src = read_python(iid_dir) if os.path.isdir(iid_dir) else ""
+if not iid_src:
+    problems.append("ComfyUI_InstantID ontbreekt of bevat geen python")
+else:
+    for want in INSTANTID_NODES:
+        if re.search(r'["\']%s["\']\s*:' % re.escape(want), iid_src):
+            print("  ok   %s staat in NODE_CLASS_MAPPINGS" % want)
+        else:
+            print("  MIST %s" % want)
+            problems.append("node niet geregistreerd: " + want)
+
+print("== onnxruntime draait op de GPU ==")
+# De requirements van InstantID bevatten een kale `onnxruntime`. Die naast
+# onnxruntime-gpu installeren geeft twee pakketten die dezelfde module
+# claimen, en dan valt de swap stilletjes terug op de CPU.
+try:
+    import onnxruntime
+    providers = onnxruntime.get_available_providers()
+    if "CUDAExecutionProvider" in providers:
+        print("  ok   %s" % ", ".join(providers))
+    else:
+        problems.append("onnxruntime heeft geen CUDAExecutionProvider: %s" % providers)
+except Exception as e:
+    problems.append("onnxruntime niet importeerbaar: %s" % str(e)[:90])
 
 print("== videohelpersuite ==")
 vhs = os.path.join(COMFY, "custom_nodes", "ComfyUI-VideoHelperSuite")

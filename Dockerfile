@@ -261,6 +261,98 @@ RUN apt-get update && \
 COPY patch_handler.py /tmp/patch_handler.py
 RUN python /tmp/patch_handler.py && rm -f /tmp/patch_handler.py
 
+# ---- InstantID: gelijkenis TIJDENS het genereren ----
+#
+# Waarom hier een tweede techniek naast ReActor staat, is gemeten. ReActor
+# swapt achteraf: hyperswap levert een gezicht van 256x256 dat over het
+# gegenereerde gezicht wordt geplakt. Bij een portret op 832x1216 gaat dat
+# goed, maar zodra het gezicht groot in beeld komt wordt die 256 tot vier keer
+# uitgerekt en blijft er pap over. Dezelfde prompt en seed gaven zonder swap
+# een messcherp gezicht (PNG van 2,1 MB) en met swap een wazige (1,0-1,4 MB).
+#
+# Niets aan de swap-kant hielp daar tegen: GPEN-512 tegen GPEN-1024,
+# face_restore_visibility (die parameter wordt genegeerd - 0,5 en 1,0 gaven
+# byte-identieke uitvoer), ReActorFaceBoost, de bronfoto vooraf 4x opschalen,
+# en een img2img-verfijning erna. Het is een harde grens van de techniek.
+#
+# InstantID werkt fundamenteel anders: het voert de identiteit als conditie
+# aan het model tijdens het samplen, dus het gezicht wordt op de volle
+# resolutie GEGENEREERD in plaats van er als kleine bitmap op geplakt. Daarmee
+# verdwijnt de resolutiegrens.
+#
+# ReActor blijft staan. Het is snel, het werkt goed op afstand, en het is het
+# vangnet als InstantID met deze Pony-merge vecht over stijl.
+#
+# De requirements van de node worden GEFILTERD. Er staat een kale
+# `onnxruntime` in, en die naast onnxruntime-gpu installeren levert twee
+# pakketten die dezelfde module claimen - waarna de swap stilletjes op de CPU
+# belandt of helemaal breekt. De regel voor onnxruntime-gpu blijft wel staan.
+RUN set -eux; \
+    git clone --depth 1 https://github.com/cubiq/ComfyUI_InstantID.git \
+      /comfyui/custom_nodes/ComfyUI_InstantID; \
+    grep -v -E '^[[:space:]]*onnxruntime[[:space:]]*$' \
+      /comfyui/custom_nodes/ComfyUI_InstantID/requirements.txt > /tmp/instantid-req.txt; \
+    echo "--- wat er geinstalleerd wordt:"; cat /tmp/instantid-req.txt; \
+    python -m pip install --no-cache-dir -r /tmp/instantid-req.txt; \
+    rm -f /tmp/instantid-req.txt; \
+    python -c "import onnxruntime; ps = onnxruntime.get_available_providers(); print('providers:', ps); assert 'CUDAExecutionProvider' in ps, 'onnxruntime-gpu is verdrongen'"
+
+# Het IP-Adapter-deel van InstantID: de identiteitsinbedding.
+RUN comfy model download \
+      --url https://huggingface.co/InstantX/InstantID/resolve/main/ip-adapter.bin \
+      --relative-path models/instantid \
+      --filename ip-adapter.bin
+
+# En de bijbehorende ControlNet, die de gezichtshouding stuurt. Upstream heet
+# het bestand alleen diffusion_pytorch_model.safetensors, wat in een map vol
+# controlnets nietszeggend is; vandaar de naam met voorvoegsel.
+RUN comfy model download \
+      --url https://huggingface.co/InstantX/InstantID/resolve/main/ControlNetModel/diffusion_pytorch_model.safetensors \
+      --relative-path models/controlnet \
+      --filename instantid_diffusion_pytorch_model.safetensors
+
+# InstantID gebruikt antelopev2, niet de buffalo_l die ReActor gebruikt - een
+# andere gezichtsencoder met een eigen inbeddingsruimte, dus ze zijn niet
+# uitwisselbaar. Beide sets staan daarom naast elkaar in het image.
+#
+# De zip pakt uit MET een map antelopev2 erin. Zonder platslaan komen de
+# modellen in models/antelopev2/antelopev2/ terecht, waar insightface niet
+# kijkt, en dan faalt het pas bij de eerste generatie met een lege modellijst.
+RUN set -eux; \
+    dest=/comfyui/models/insightface/models/antelopev2; \
+    mkdir -p "$dest"; \
+    curl -fL --retry 3 --retry-delay 5 -o /tmp/antelopev2.zip \
+      https://huggingface.co/MonsterMMORPG/tools/resolve/main/antelopev2.zip; \
+    test -s /tmp/antelopev2.zip; \
+    unzip -o /tmp/antelopev2.zip -d "$dest"; \
+    rm -f /tmp/antelopev2.zip; \
+    if [ -d "$dest/antelopev2" ]; then \
+      mv "$dest"/antelopev2/* "$dest"/; \
+      rmdir "$dest/antelopev2"; \
+    fi; \
+    ls -la "$dest"
+
+# ---- maskeermodellen, zodat de swap de mond met rust kan laten ----
+#
+# ReActorMaskHelper zit al in de node (gecontroleerd op de draaiende endpoint:
+# de node is geregistreerd, alleen de modellen ontbraken). Hij brengt zijn
+# eigen maskeercode mee, dus Impact Pack is NIET nodig - alleen deze twee
+# bestanden.
+#
+# Waarvoor: bij een blowjob plakt een gewone swap het hele gezichtsvlak terug,
+# inclusief mond, over alles heen wat ervoor zit. Daarom staat de swap daar nu
+# helemaal uit. Met een masker kan hij aan blijven en blijft wat voor haar
+# gezicht langsloopt bewaard.
+RUN comfy model download \
+      --url https://huggingface.co/Bingsu/adetailer/resolve/main/face_yolov8m.pt \
+      --relative-path models/ultralytics/bbox \
+      --filename face_yolov8m.pt
+
+RUN comfy model download \
+      --url https://dl.fbaipublicfiles.com/segment_anything/sam_vit_b_01ec64.pth \
+      --relative-path models/sams \
+      --filename sam_vit_b_01ec64.pth
+
 # Liever de build laten vallen dan een generatie. Dit controleert niet alleen
 # of de bestanden er staan, maar IMPORTEERT de node zoals ComfyUI dat doet -
 # want de eerste geslaagde build leverde een image op waarin ReActor wel op
