@@ -387,6 +387,31 @@ RUN comfy model download \
       --relative-path models/sams \
       --filename sam_vit_b_01ec64.pth
 
+# ---- Wan 2.2 voor video, ter vervanging van SVD ----
+#
+# SVD is de reden dat clips tegenvielen, en dat is geen instellingenkwestie:
+# SVD HEEFT GEEN TEKSTPROMPT. Hij ziet alleen het beginbeeld en verzint daar
+# beweging bij. Bij een seksscene dreef de handeling daardoor binnen een
+# seconde weg - frame 0 toonde de penetratie, frame 12 niet meer - en er was
+# geen manier om hem te vertellen dat hij die moest vasthouden.
+#
+# Wan 2.2 neemt beeld EN tekst. Daarmee is de handeling te benoemen, en de
+# clip wordt 81 frames op 16 fps (5 seconden) in plaats van 25 frames.
+#
+# De 5B-variant, niet de 14B: die past op elke kaart in het endpoint en
+# rendert in ongeveer een minuut. De 14B (2x 13,3 GB) zou 24 GB VRAM eisen en
+# vier a vijf minuten per clip kosten.
+#
+# Let op: de 5B heeft zijn EIGEN vae (wan2.2_vae), niet die van 2.1. Die twee
+# verwisselen levert ruis op in plaats van beeld.
+RUN comfy model download       --url https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/diffusion_models/wan2.2_ti2v_5B_fp16.safetensors       --relative-path models/diffusion_models       --filename wan2.2_ti2v_5B_fp16.safetensors
+
+RUN comfy model download       --url https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/vae/wan2.2_vae.safetensors       --relative-path models/vae       --filename wan2.2_vae.safetensors
+
+# De tekstencoder. fp8 omdat de fp16 het dubbele weegt zonder dat het voor
+# promptbegrip merkbaar uitmaakt.
+RUN comfy model download       --url https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors       --relative-path models/text_encoders       --filename umt5_xxl_fp8_e4m3fn_scaled.safetensors
+
 # Liever de build laten vallen dan een generatie. Dit controleert niet alleen
 # of de bestanden er staan, maar IMPORTEERT de node zoals ComfyUI dat doet -
 # want de eerste geslaagde build leverde een image op waarin ReActor wel op

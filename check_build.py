@@ -55,6 +55,10 @@ MODELS = [
     # langsloopt.
     "models/ultralytics/bbox/face_yolov8m.pt",
     "models/sams/sam_vit_b_01ec64.pth",
+    # Wan 2.2 voor video. De 5B gebruikt zijn eigen vae; die van 2.1 geeft ruis.
+    "models/diffusion_models/wan2.2_ti2v_5B_fp16.safetensors",
+    "models/vae/wan2.2_vae.safetensors",
+    "models/text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors",
 ]
 
 # buffalo_l bevat vijf modellen. De bestaanscontrole van ReActor kijkt maar
