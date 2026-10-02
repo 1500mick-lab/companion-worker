@@ -27,6 +27,8 @@ tar -C "$BRON" \
   --exclude='*.pem' --exclude='*.key' --exclude=id_rsa --exclude=id_ed25519 \
   --exclude=node_modules --exclude=venv --exclude=.venv --exclude=__pycache__ \
   --exclude='*.log' --exclude='*.sqlite' --exclude='*.db' --exclude=dist --exclude=build \
+  --exclude=backoffice --exclude='accounts*.json' --exclude='*.bak*' --exclude='*.tar.gz' \
+  --exclude='*.swf' --exclude='*.original_unpat*' \
   -cf - . | tar -xf -
 
 # Bestanden groter dan 50 MB horen niet in git.
