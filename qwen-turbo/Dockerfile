@@ -7,5 +7,5 @@ RUN pip install --no-cache-dir runpod==1.12.0 transformers==5.20.1 accelerate pi
 COPY qwen-turbo/download_model.py /app/download_model.py
 RUN python /app/download_model.py
 ENV HF_HUB_OFFLINE=1 MODEL_PATH=/opt/qwen-image-21-turbo
-COPY qwen-turbo/handler.py /app/handler.py
+COPY handler.py /app/handler.py
 CMD ["python", "-u", "/app/handler.py"]
