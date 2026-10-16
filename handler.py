@@ -6,6 +6,8 @@ import os
 import secrets
 import threading
 
+import runpod
+
 MODEL_ID = "Qwen/Qwen-Image-2.1-Turbo"
 REVISION = "fc13ba1986fcb905854dc8de2f52eee395f49b5b"
 lock = threading.Lock()
@@ -31,7 +33,6 @@ def validate(data):
 
 
 def main():
-    import runpod
     import torch
     from diffusers import QwenImage21Pipeline
 
