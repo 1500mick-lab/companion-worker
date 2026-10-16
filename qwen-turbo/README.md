@@ -2,7 +2,7 @@
 
 Deze branch bevat een aparte native Diffusers-worker voor `Qwen/Qwen-Image-2.1-Turbo`. De bestaande `main`-branch blijft ongewijzigd.
 
-Gebruik op RunPod de branch `codex/qwen-image-21-turbo`, Dockerfile `/qwen-turbo/Dockerfile` en buildcontext `/`. De image bevat het vastgezette officiële model; een apart netwerkvolume is niet nodig.
+Gebruik op RunPod de branch `codex/qwen-image-21-turbo`, Dockerfile `/qwen-turbo/Dockerfile` en buildcontext `/`. Stel het veld Model in op `Qwen/Qwen-Image-2.1-Turbo`. De worker leest het vastgezette officiële model uit RunPods modelcache; een apart netwerkvolume is niet nodig. De gewichten worden dus niet in de container ingebakken.
 
 Voorbereide instellingen: één A40 of RTX A6000 met 48 GB VRAM, min 0/max 1 worker, FlashBoot standaard, idle timeout 30 seconden, uitvoeringstime-out 600 seconden, containerschijf 80 GB. Controleer het actuele tarief in het deploymentformulier.
 
