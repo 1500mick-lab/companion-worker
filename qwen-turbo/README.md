@@ -6,7 +6,7 @@ Gebruik op RunPod de branch `codex/qwen-image-21-turbo`, Dockerfile `/qwen-turbo
 
 Voorbereide instellingen: één A40 of RTX A6000 met 48 GB VRAM, min 0/max 1 worker, FlashBoot standaard, idle timeout 30 seconden, uitvoeringstime-out 600 seconden, containerschijf 80 GB. Controleer het actuele tarief in het deploymentformulier.
 
-De worker gebruikt de officiële achtstappenscheduler. Hij accepteert alleen tekst-naar-afbeelding, één PNG per verzoek, maximaal 1,5 megapixel. Beeldbewerking en faceswap zijn geen onderdeel van deze worker. Het model heeft de Qwen Research License; zie de officiële modelpagina voor de voorwaarden.
+De worker gebruikt de officiële achtstappenscheduler. Hij accepteert tekst en optioneel een referentiefoto via `faceReference` of een te bewerken afbeelding via `initImage` (base64 PNG/JPEG/WebP, maximaal 6 MB en 12 megapixel). Een gezichtsreferentie krijgt een instructie om dezelfde persoon te behouden. Referenties worden met EXIF-correctie tot maximaal 1024 pixels verkleind. Er komt één PNG per verzoek terug, maximaal 1,5 megapixel. Dit is beeldbewerking met Qwen, geen ReActor-faceswap; exacte gezichtsidentiteit is niet gegarandeerd. Zonder referentie blijft tekst-naar-afbeelding werken. Het model heeft de Qwen Research License; zie de officiële modelpagina voor de voorwaarden.
 
 Candy gebruikt `IMAGE_BACKEND=qwen-runpod`, `RUNPOD_API_KEY` en `MEDIA_SERVERLESS_ENDPOINT_ID` op de server. Er is geen QwenCloud-sleutel nodig voor deze worker. De oude QwenCloud-adapter blijft als aparte mogelijkheid beschikbaar.
 
