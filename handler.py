@@ -5,6 +5,7 @@ import logging
 import os
 import secrets
 import threading
+from pathlib import Path
 
 import runpod
 
@@ -38,8 +39,15 @@ def main():
 
     if not torch.cuda.is_available():
         raise RuntimeError("A CUDA GPU is required")
+    model_path = Path(os.environ.get("MODEL_PATH", "/opt/qwen-image-21-turbo"))
+    if not (model_path / "model_index.json").exists():
+        from huggingface_hub import snapshot_download
+        snapshot_download(
+            repo_id=MODEL_ID, revision=REVISION, local_dir=str(model_path),
+            ignore_patterns=["assets/*", ".gitattributes"], max_workers=4,
+        )
     pipe = QwenImage21Pipeline.from_pretrained(
-        os.environ.get("MODEL_PATH", "/opt/qwen-image-21-turbo"),
+        str(model_path),
         dtype=torch.bfloat16, local_files_only=True,
     ).to("cuda")
     pipe.set_progress_bar_config(disable=True)
