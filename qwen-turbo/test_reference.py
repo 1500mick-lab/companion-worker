@@ -21,12 +21,11 @@ class ReferenceTests(unittest.TestCase):
         Image.new("RGB", size, "blue").save(output, "PNG")
         return base64.b64encode(output.getvalue()).decode()
 
-    def test_face_is_decoded_and_identity_instruction_is_added(self):
+    def test_face_is_decoded_without_rewriting_scene(self):
         prompt, _, _, _, ref = worker.validate({"prompt": "in a garden", "faceReference": self.image()})
         self.assertEqual(ref.size, (64, 80))
         self.assertEqual(ref.mode, "RGBA")
-        self.assertIn("Preserve their facial identity", prompt)
-        self.assertTrue(prompt.endswith("in a garden"))
+        self.assertEqual(prompt, "in a garden")
 
     def test_large_input_is_downscaled_and_face_takes_precedence(self):
         *_, ref = worker.validate({"prompt": "portrait", "faceReference": self.image((1600, 1200)), "initImage": "invalid"})

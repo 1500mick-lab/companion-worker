@@ -1,4 +1,4 @@
-"""Single-image RunPod worker using Qwen's official Turbo checkpoint."""
+"""SDXL FaceID Plus V2 worker: condition generation on identity, never swap pixels."""
 import base64
 import binascii
 import io
@@ -12,8 +12,8 @@ from pathlib import Path
 import runpod
 from PIL import Image, ImageOps, UnidentifiedImageError
 
-MODEL_ID = "Qwen/Qwen-Image-2.1-Turbo"
-REVISION = "fc13ba1986fcb905854dc8de2f52eee395f49b5b"
+MODEL_ID = "SG161222/RealVisXL_V4.0"
+REVISION = "26dfe44930964cd70d0a817b6d1cc945c130e38d"
 lock = threading.Lock()
 Image.MAX_IMAGE_PIXELS = 12_000_000
 
@@ -51,13 +51,6 @@ def validate(data):
         raise ValueError("Use faceReference or initImage for a single reference")
     face = data.get("faceReference")
     reference = reference_image(face if face is not None else data.get("initImage"))
-    if face is not None:
-        prompt = (
-            "Use the person in the reference image as the same character in the new photograph. "
-            "Preserve their facial identity, facial proportions, eye shape, nose, lips, skin tone "
-            "and distinctive facial features. Do not replace their face with a different person. "
-            "Change the pose, clothing and background as requested in this scene: " + prompt
-        )
     width, height = data.get("width", 1024), data.get("height", 1024)
     if any(type(v) is not int or v < 256 or v > 1536 or v % 32 for v in (width, height)):
         raise ValueError("dimensions must be multiples of 32 from 256 to 1536")
@@ -70,57 +63,85 @@ def validate(data):
 
 
 def main():
+    import cv2
+    import numpy as np
     import torch
-    from diffusers import QwenImage21Pipeline
+    from diffusers import AutoencoderKL, DDIMScheduler, StableDiffusionXLPipeline
+    from huggingface_hub import hf_hub_download, snapshot_download
+    from insightface.app import FaceAnalysis
+    from insightface.utils import face_align
+    from ip_adapter.ip_adapter_faceid import IPAdapterFaceIDPlusXL
 
     if not torch.cuda.is_available():
         raise RuntimeError("A CUDA GPU is required")
-    model_path = Path(os.environ.get("MODEL_PATH", "/opt/qwen-image-21-turbo"))
-    if not (model_path / "model_index.json").exists():
-        from huggingface_hub import snapshot_download
-        snapshot_download(
-            repo_id=MODEL_ID, revision=REVISION, local_dir=str(model_path),
-            ignore_patterns=["assets/*", ".gitattributes"], max_workers=4,
-        )
-    pipe = QwenImage21Pipeline.from_pretrained(
-        str(model_path),
-        dtype=torch.bfloat16, local_files_only=True,
-    ).to("cuda")
+    cache = Path("/opt/faceid-models")
+    cache.mkdir(exist_ok=True)
+    model = snapshot_download(MODEL_ID, revision=REVISION, local_dir=str(cache / "sdxl"),
+        allow_patterns=["model_index.json", "scheduler/*", "tokenizer/*", "tokenizer_2/*",
+                        "text_encoder/config.json", "text_encoder/model.fp16.safetensors",
+                        "text_encoder_2/config.json", "text_encoder_2/model.fp16.safetensors",
+                        "unet/config.json", "unet/diffusion_pytorch_model.fp16.safetensors"])
+    vae_path = snapshot_download("madebyollin/sdxl-vae-fp16-fix", revision="207b116dae70ace3637169f1ddd2434b91b3a8cd",
+        local_dir=str(cache / "vae"), allow_patterns=["config.json", "diffusion_pytorch_model.safetensors"])
+    encoder = snapshot_download("h94/IP-Adapter", revision="018e402774aeeddd60609b4ecdb7e298259dc729",
+        local_dir=str(cache / "clip"), allow_patterns=["models/image_encoder/config.json", "models/image_encoder/model.safetensors"])
+    adapter_path = hf_hub_download("h94/IP-Adapter-FaceID", "ip-adapter-faceid-plusv2_sdxl.bin",
+        revision="43907e6f44d079bf1a9102d9a6e56aef7a219bae")
+    vae = AutoencoderKL.from_pretrained(vae_path, torch_dtype=torch.float16)
+    pipe = StableDiffusionXLPipeline.from_pretrained(model, vae=vae,
+        torch_dtype=torch.float16, variant="fp16", local_files_only=True, add_watermarker=False).to("cuda")
+    pipe.scheduler = DDIMScheduler(num_train_timesteps=1000, beta_start=0.00085, beta_end=0.012,
+        beta_schedule="scaled_linear", clip_sample=False, set_alpha_to_one=False, steps_offset=1)
     pipe.set_progress_bar_config(disable=True)
-    # Qwen Image 2.1 tiled decoding introduces magenta seams in RGB and alpha.
-    # Decode the complete frame; never hide this defect with color correction.
     pipe.vae.disable_tiling()
-    pipe.vae.disable_slicing()
+    adapter = IPAdapterFaceIDPlusXL(pipe, str(Path(encoder) / "models/image_encoder"), adapter_path, "cuda")
+    faces = FaceAnalysis(name="buffalo_l", root=str(cache / "insightface"),
+        allowed_modules=["detection", "recognition"], providers=["CPUExecutionProvider"])
+    faces.prepare(ctx_id=-1, det_size=(640, 640))
 
     def handler(job):
         try:
-            prompt, width, height, seed, reference = validate(job.get("input"))
+            data = job.get("input")
+            prompt, width, height, seed, reference = validate(data)
+            negative = data.get("negativePrompt", "")
+            if not isinstance(negative, str) or len(negative) > 4000:
+                raise ValueError("Invalid negative prompt")
+            # Bound compute independently of legacy client step preferences.
+            steps = 30
         except ValueError as error:
             return {"error": str(error)}
         with lock, torch.inference_mode():
             try:
-                # The checkpoint supplies its own official eight-step sigmas.
-                image = pipe(
-                    prompt=prompt, width=width, height=height,
-                    image=reference,
-                    use_kv_cache=True,
-                    generator=torch.Generator("cpu").manual_seed(seed),
-                ).images[0]
+                if reference is not None:
+                    rgb = np.array(reference.convert("RGB"))
+                    detected = faces.get(cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR))
+                    if len(detected) != 1:
+                        return {"error": "FaceID vereist precies één duidelijk zichtbaar gezicht in de profielfoto."}
+                    face = detected[0]
+                    embedding = torch.from_numpy(face.normed_embedding).unsqueeze(0)
+                    crop = face_align.norm_crop(rgb, landmark=face.kps, image_size=224)
+                else:
+                    # Keep adapter token layout valid while disabling all identity influence.
+                    embedding = torch.zeros((1, 512))
+                    crop = Image.new("RGB", (224, 224), "black")
+                images = adapter.generate(face_image=crop, faceid_embeds=embedding,
+                    prompt=prompt, negative_prompt=negative or "blurry, low quality, distorted face, watermark, text",
+                    scale=0.8 if reference is not None else 0.0, s_scale=1.0, shortcut=True,
+                    num_samples=1, num_inference_steps=steps, guidance_scale=6.0,
+                    width=width, height=height, seed=seed)
                 buffer = io.BytesIO()
-                image.save(buffer, format="PNG")
+                images[0].convert("RGB").save(buffer, format="PNG")
                 if buffer.tell() > 5_500_000:
                     return {"error": "Result exceeds the inline image size limit"}
-                return {
-                    "model": MODEL_ID, "revision": REVISION, "seed": seed,
-                    "reference_used": reference is not None,
-                    "vae_tiling": False,
-                    "images": [{"data": base64.b64encode(buffer.getvalue()).decode("ascii")}],
-                }
+                return {"model": MODEL_ID, "revision": REVISION, "seed": seed,
+                    "identity_engine": "ip-adapter-faceid-plusv2-sdxl",
+                    "reference_used": reference is not None, "face_swap_applied": False,
+                    "images": [{"data": base64.b64encode(buffer.getvalue()).decode("ascii")} ]}
             except torch.cuda.OutOfMemoryError:
                 return {"error": "GPU memory exhausted; reduce image dimensions", "refresh_worker": True}
             except Exception:
-                logging.exception("Qwen generation failed")
-                return {"error": "Image generation failed; check the worker logs", "refresh_worker": True}
+                logging.exception("SDXL FaceID generation failed")
+                return {"error": "FaceID generation failed; check the worker logs", "refresh_worker": True}
 
     runpod.serverless.start({"handler": handler})
 
