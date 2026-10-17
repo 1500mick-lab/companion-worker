@@ -87,7 +87,10 @@ def main():
         dtype=torch.bfloat16, local_files_only=True,
     ).to("cuda")
     pipe.set_progress_bar_config(disable=True)
-    pipe.vae.enable_tiling()
+    # Qwen Image 2.1 tiled decoding introduces magenta seams in RGB and alpha.
+    # Decode the complete frame; never hide this defect with color correction.
+    pipe.vae.disable_tiling()
+    pipe.vae.disable_slicing()
 
     def handler(job):
         try:
@@ -110,6 +113,7 @@ def main():
                 return {
                     "model": MODEL_ID, "revision": REVISION, "seed": seed,
                     "reference_used": reference is not None,
+                    "vae_tiling": False,
                     "images": [{"data": base64.b64encode(buffer.getvalue()).decode("ascii")}],
                 }
             except torch.cuda.OutOfMemoryError:
