@@ -63,6 +63,7 @@ def validate(data):
 
 
 def main():
+    print("Loading SDXL FaceID Plus V2 worker", flush=True)
     import cv2
     import numpy as np
     import torch
@@ -147,4 +148,9 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception:
+        import sys, traceback
+        traceback.print_exc(file=sys.stdout)
+        raise
