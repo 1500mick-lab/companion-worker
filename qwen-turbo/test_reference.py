@@ -43,5 +43,24 @@ class ReferenceTests(unittest.TestCase):
                 worker.validate({"prompt": "portrait", "faceReference": value})
 
 
+class QualityTests(unittest.TestCase):
+    def test_small_legacy_sizes_render_native_detail_with_bounded_work(self):
+        for width, height in [(512, 640), (768, 1024), (832, 1216), (1024, 1024), (1536, 1024)]:
+            out_w, out_h = worker.quality_dimensions(width, height)
+            self.assertGreaterEqual(out_w * out_h, 1_400_000)
+            self.assertLessEqual(out_w * out_h, 1_572_864)
+            self.assertLessEqual(max(out_w, out_h), 1536)
+            self.assertEqual(out_w % 32, 0)
+            self.assertEqual(out_h % 32, 0)
+            self.assertLess(abs(out_w / out_h - width / height), 0.04)
+
+    def test_extreme_ratios_remain_within_existing_memory_limit(self):
+        for width, height in [(256, 1536), (1536, 256), (256, 256)]:
+            w, h = worker.quality_dimensions(width, height)
+            self.assertLessEqual(w * h, 1_572_864)
+            self.assertLessEqual(max(w, h), 1536)
+            self.assertGreaterEqual(min(w, h), 256)
+
+
 if __name__ == "__main__":
     unittest.main()

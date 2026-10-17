@@ -3,6 +3,7 @@ import base64
 import binascii
 import io
 import logging
+import math
 import os
 import secrets
 import threading
@@ -62,12 +63,18 @@ def validate(data):
     return prompt, width, height, seed, reference
 
 
+
+def quality_dimensions(width, height):
+    """Render detail natively, preserving aspect ratio within the existing GPU limit."""
+    scale = min(math.sqrt(1572864 / (width * height)), 1536 / max(width, height))
+    return max(256, int(width * scale) // 32 * 32), max(256, int(height * scale) // 32 * 32)
+
 def main():
     print("Loading SDXL FaceID Plus V2 worker", flush=True)
     import cv2
     import numpy as np
     import torch
-    from diffusers import AutoencoderKL, DDIMScheduler, StableDiffusionXLPipeline
+    from diffusers import AutoencoderKL, DPMSolverMultistepScheduler, StableDiffusionXLPipeline
     from huggingface_hub import hf_hub_download, snapshot_download
     from insightface.app import FaceAnalysis
     from insightface.utils import face_align
@@ -91,8 +98,10 @@ def main():
     vae = AutoencoderKL.from_pretrained(vae_path, torch_dtype=torch.float16)
     pipe = StableDiffusionXLPipeline.from_pretrained(model, vae=vae,
         torch_dtype=torch.float16, variant="fp16", local_files_only=True, add_watermarker=False).to("cuda")
-    pipe.scheduler = DDIMScheduler(num_train_timesteps=1000, beta_start=0.00085, beta_end=0.012,
-        beta_schedule="scaled_linear", clip_sample=False, set_alpha_to_one=False, steps_offset=1)
+    pipe.scheduler = DPMSolverMultistepScheduler(
+        num_train_timesteps=1000, beta_start=0.00085, beta_end=0.012,
+        beta_schedule="scaled_linear", algorithm_type="dpmsolver++", solver_order=2,
+        use_karras_sigmas=True, steps_offset=1)
     pipe.set_progress_bar_config(disable=True)
     pipe.vae.disable_tiling()
     adapter = IPAdapterFaceIDPlusXL(pipe, str(Path(encoder) / "models/image_encoder"), adapter_path, "cuda")
@@ -107,8 +116,10 @@ def main():
             negative = data.get("negativePrompt", "")
             if not isinstance(negative, str) or len(negative) > 4000:
                 raise ValueError("Invalid negative prompt")
-            # Bound compute independently of legacy client step preferences.
-            steps = 30
+            # Apply the quality floor even to older clients with small saved dimensions.
+            width, height = quality_dimensions(width, height)
+            steps = 40
+            negative = "blurry, low resolution, jpeg artifacts, distorted face, deformed eyes, watermark, text, " + negative
         except ValueError as error:
             return {"error": str(error)}
         with lock, torch.inference_mode():
@@ -137,6 +148,7 @@ def main():
                 return {"model": MODEL_ID, "revision": REVISION, "seed": seed,
                     "identity_engine": "ip-adapter-faceid-plusv2-sdxl",
                     "reference_used": reference is not None, "face_swap_applied": False,
+                    "width": width, "height": height, "steps": steps, "sampler": "DPM++ 2M Karras",
                     "images": [{"data": base64.b64encode(buffer.getvalue()).decode("ascii")} ]}
             except torch.cuda.OutOfMemoryError:
                 return {"error": "GPU memory exhausted; reduce image dimensions", "refresh_worker": True}
